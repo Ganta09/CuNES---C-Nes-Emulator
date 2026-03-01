@@ -2,6 +2,7 @@ using cunes.Ppu;
 using Raylib_cs;
 using System.Diagnostics;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using System.Threading;
 using Color = Raylib_cs.Color;
 using Rectangle = Raylib_cs.Rectangle;
@@ -16,6 +17,8 @@ public sealed class RaylibRenderer : IRenderer
     private const int AudioPrimeSamples = AudioChunkSize * 3;
 
     private readonly Texture2D _texture;
+    private readonly Texture2D _noRomLogoTexture = default;
+    private readonly byte[] _noRomBackgroundFrame;
     private readonly Rectangle _sourceRect;
     private readonly Rectangle _destinationRect;
     private readonly AudioStream _audioStream = default;
@@ -26,6 +29,8 @@ public sealed class RaylibRenderer : IRenderer
     private readonly Stopwatch _audioDebugStopwatch = new();
     private readonly Queue<UiAction> _uiActions = new();
     private string _windowTitle = string.Empty;
+    private readonly bool _noRomLogoLoaded;
+    private System.Drawing.Icon? _windowIcon;
 
     private bool _disposed;
     private bool _audioPrimed;
@@ -69,6 +74,7 @@ public sealed class RaylibRenderer : IRenderer
 
         Raylib.SetConfigFlags(ConfigFlags.VSyncHint);
         Raylib.InitWindow(width, height, title);
+        TrySetWindowIcon();
         // Avoid double throttling (VSync + software FPS limiter), which can add micro-stutter.
         Raylib.SetTargetFPS(0);
         _windowTitle = title;
@@ -76,9 +82,11 @@ public sealed class RaylibRenderer : IRenderer
         var image = Raylib.GenImageColor(Ppu2C02.ScreenWidth, Ppu2C02.ScreenHeight, Color.Black);
         _texture = Raylib.LoadTextureFromImage(image);
         Raylib.UnloadImage(image);
+        _noRomLogoLoaded = TryLoadNoRomLogo(out _noRomLogoTexture);
 
         _sourceRect = new Rectangle(0, 0, Ppu2C02.ScreenWidth, Ppu2C02.ScreenHeight);
         _destinationRect = new Rectangle(0, 0, width, height);
+        _noRomBackgroundFrame = CreateSolidFrame(Ppu2C02.ScreenWidth, Ppu2C02.ScreenHeight, 84, 84, 84, 255);
 
         try
         {
@@ -124,11 +132,18 @@ public sealed class RaylibRenderer : IRenderer
         }
 
         HandleUiInput();
-        Raylib.UpdateTexture(_texture, frameBuffer);
+        if (_romLoaded)
+        {
+            Raylib.UpdateTexture(_texture, frameBuffer);
+        }
 
         Raylib.BeginDrawing();
         Raylib.ClearBackground(Color.Black);
         Raylib.DrawTexturePro(_texture, _sourceRect, _destinationRect, Vector2.Zero, 0, Color.White);
+        if (!_romLoaded)
+        {
+            DrawNoRomLogo();
+        }
         DrawContextMenu();
         DrawKeyBindPanel();
         Raylib.EndDrawing();
@@ -219,6 +234,7 @@ public sealed class RaylibRenderer : IRenderer
         if (!_romLoaded)
         {
             _contextMenuOpen = false;
+            Raylib.UpdateTexture(_texture, _noRomBackgroundFrame);
         }
     }
 
@@ -236,9 +252,139 @@ public sealed class RaylibRenderer : IRenderer
             Raylib.CloseAudioDevice();
         }
 
+        _windowIcon?.Dispose();
+        _windowIcon = null;
+
+        if (_noRomLogoLoaded)
+        {
+            Raylib.UnloadTexture(_noRomLogoTexture);
+        }
+
         Raylib.UnloadTexture(_texture);
         Raylib.CloseWindow();
         _disposed = true;
+    }
+
+    private void DrawNoRomLogo()
+    {
+        if (!_noRomLogoLoaded || _noRomLogoTexture.Width <= 0 || _noRomLogoTexture.Height <= 0)
+        {
+            return;
+        }
+
+        var screenWidth = Raylib.GetScreenWidth();
+        var screenHeight = Raylib.GetScreenHeight();
+        var widthScale = (screenWidth * 0.55f) / _noRomLogoTexture.Width;
+        var heightScale = (screenHeight * 0.55f) / _noRomLogoTexture.Height;
+        var scale = Math.Min(Math.Min(widthScale, heightScale), 1.0f);
+
+        var drawWidth = _noRomLogoTexture.Width * scale;
+        var drawHeight = _noRomLogoTexture.Height * scale;
+        var x = (screenWidth - drawWidth) / 2f;
+        var y = (screenHeight - drawHeight) / 2f;
+
+        Raylib.DrawTextureEx(_noRomLogoTexture, new Vector2(x, y), 0f, scale, new Color(255, 255, 255, 230));
+    }
+
+    private static bool TryLoadNoRomLogo(out Texture2D texture)
+    {
+        var candidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "Frontend", "CuNES.png"),
+            Path.Combine(Directory.GetCurrentDirectory(), "Frontend", "CuNES.png"),
+            Path.Combine(Directory.GetCurrentDirectory(), "CuNES.png")
+        };
+
+        foreach (var path in candidates)
+        {
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            try
+            {
+                texture = Raylib.LoadTexture(path);
+                return texture.Width > 0 && texture.Height > 0;
+            }
+            catch
+            {
+                // Ignore and continue trying fallback paths.
+            }
+        }
+
+        texture = default;
+        return false;
+    }
+
+    private void TrySetWindowIcon()
+    {
+        var candidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "Frontend", "CuNESlogo.ico"),
+            Path.Combine(Directory.GetCurrentDirectory(), "Frontend", "CuNESlogo.ico"),
+            Path.Combine(Directory.GetCurrentDirectory(), "CuNESlogo.ico")
+        };
+
+        foreach (var path in candidates)
+        {
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            try
+            {
+                var icon = new System.Drawing.Icon(path);
+                if (!TrySetWindowIconWindows(icon))
+                {
+                    icon.Dispose();
+                    continue;
+                }
+
+                _windowIcon?.Dispose();
+                _windowIcon = icon;
+                return;
+            }
+            catch
+            {
+                // Ignore and continue trying fallback paths.
+            }
+        }
+    }
+
+    private static unsafe bool TrySetWindowIconWindows(System.Drawing.Icon icon)
+    {
+        var windowHandle = (IntPtr)Raylib.GetWindowHandle();
+        if (windowHandle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        SendMessage(windowHandle, WmSetIcon, (IntPtr)IconSmall, icon.Handle);
+        SendMessage(windowHandle, WmSetIcon, (IntPtr)IconBig, icon.Handle);
+        return true;
+    }
+
+    private const uint WmSetIcon = 0x0080;
+    private const int IconSmall = 0;
+    private const int IconBig = 1;
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    private static byte[] CreateSolidFrame(int width, int height, byte r, byte g, byte b, byte a)
+    {
+        var frame = new byte[width * height * 4];
+        for (var i = 0; i < frame.Length; i += 4)
+        {
+            frame[i] = r;
+            frame[i + 1] = g;
+            frame[i + 2] = b;
+            frame[i + 3] = a;
+        }
+
+        return frame;
     }
 
     private unsafe void PumpAudio()

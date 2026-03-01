@@ -7,6 +7,7 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon>Frontend\CuNESlogo.ico</ApplicationIcon>
     <Version>0.1.1</Version>
     <AssemblyVersion>0.1.1.0</AssemblyVersion>
     <FileVersion>0.1.1.0</FileVersion>
@@ -15,6 +16,17 @@
 
   <ItemGroup>
     <PackageReference Include="Raylib-cs" Version="6.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Frontend\CuNES.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+    <None Include="Frontend\CuNESlogo.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
   </ItemGroup>
 
 </Project>
