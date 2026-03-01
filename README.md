@@ -65,7 +65,7 @@ dotnet run --project CuNES.csproj -- --rom path/to/game.nes
 
 ## Not Done Yet / Known Issues
 
-- Noise channel behavior is still a bit funky and needs tuning.
+- Noise is almost perfect but needs tuning
 - Accuracy still needs more validation against hardware behavior and test ROM suites.
 
 ## Features to add
