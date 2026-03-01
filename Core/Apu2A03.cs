@@ -104,14 +104,14 @@ public sealed class Apu2A03
             _frameIrqClearPendingOnPutToGet = false;
         }
 
-        _frameCounterCycles++;
-
         if (apuCycle)
         {
-            _pulse1.ClockTimer();
-            _pulse2.ClockTimer();
-            _noise.ClockTimer();
-            // Frame counter timing (current implementation): advance on APU cycles.
+            // ATTENTION !!:
+            // Le frame sequencer doit avancer sur les cycles APU (un CPU sur deux),
+            // pas sur chaque cycle CPU. Si on change cela, les enveloppes/length/sweep
+            // tournent trop vite et les notes pulse perdent leur sustain.
+            // De préference ne pas toucher clockcpu()
+            _frameCounterCycles++;
             if (_fiveStepMode)
             {
                 if (_frameCounterCycles is 3729 or 11186)
@@ -150,6 +150,10 @@ public sealed class Apu2A03
                     }
                 }
             }
+
+            _pulse1.ClockTimer();
+            _pulse2.ClockTimer();
+            _noise.ClockTimer();
         }
 
         _dmc.ClockCpu(_cpuRead);
@@ -510,7 +514,9 @@ var postFilter = Math.Clamp(_lpOutput, -1.0f, 1.0f);
             _lengthHalt = (value & 0x20) != 0;
             _constantVolume = (value & 0x10) != 0;
             _envelopePeriod = (byte)(value & 0x0F);
-            _envelopeStart = true;
+            // IMPORTANT:
+            // Ne pas relancer l'envelope ici. Le restart envelope pulse se fait
+            // sur WriteTimerHigh ($4003/$4007). Le faire ici casse le sustain.
         }
 
         public void WriteSweep(byte value)
@@ -835,7 +841,9 @@ var postFilter = Math.Clamp(_lpOutput, -1.0f, 1.0f);
             _lengthHalt = (value & 0x20) != 0;
             _constantVolume = (value & 0x10) != 0;
             _envelopePeriod = (byte)(value & 0x0F);
-            _envelopeStart = true;
+            // IMPORTANT:
+            // Ne pas relancer l'envelope ici. Le restart envelope noise se fait
+            // sur WriteLength ($400F). Le faire ici deraille les percussions.
         }
 
         public void WritePeriod(byte value)
@@ -933,7 +941,10 @@ var postFilter = Math.Clamp(_lpOutput, -1.0f, 1.0f);
                 return 0f;
             }
 
-            return (_lfsr & 0x0001) != 0 ? volume : 0f;
+            // IMPORTANT (polarite du noise 2A03):
+            // Le canal noise sort du son quand bit0 du LFSR == 0, et est muet quand bit0 == 1.
+            // Inverser cette condition donne des percussions incorrectes (ex: Metalman).
+            return (_lfsr & 0x0001) == 0 ? volume : 0f;
         }
 
         private void ClockLfsr()
