@@ -324,6 +324,31 @@ public sealed class RaylibRenderer : IRenderer
 
     private void TrySetWindowIcon()
     {
+        var processPath = Environment.ProcessPath;
+        if (!string.IsNullOrWhiteSpace(processPath) && File.Exists(processPath))
+        {
+            try
+            {
+                var processIcon = System.Drawing.Icon.ExtractAssociatedIcon(processPath);
+                if (processIcon is not null)
+                {
+                    if (TrySetWindowIconWindows(processIcon))
+                    {
+                        _windowIcon?.Dispose();
+                        _windowIcon = (System.Drawing.Icon)processIcon.Clone();
+                        processIcon.Dispose();
+                        return;
+                    }
+
+                    processIcon.Dispose();
+                }
+            }
+            catch
+            {
+                // Ignore and continue trying fallback paths.
+            }
+        }
+
         var candidates = new[]
         {
             Path.Combine(AppContext.BaseDirectory, "Frontend", "CuNESlogo.ico"),
