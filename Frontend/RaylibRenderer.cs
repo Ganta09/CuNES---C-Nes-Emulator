@@ -38,6 +38,7 @@ public sealed class RaylibRenderer : IRenderer
     private bool _keyBindPanelOpen;
     private bool _romLoaded;
     private int _bindingCaptureIndex = -1;
+    private int _keyBindPanelPlayer;
     private float _lastSample;
     private long _debugLastLogMs;
     private long _debugSubmittedSamples;
@@ -51,7 +52,8 @@ public sealed class RaylibRenderer : IRenderer
     private int _debugClipCount;
     private Vector2 _contextMenuPosition;
     private readonly Vector2 _persistentMenuPosition = new(12, 12);
-    private readonly KeyboardKey[] _playerOneBindings = CreateDefaultBindings();
+    private readonly KeyboardKey[] _playerOneBindings = CreatePlayerOneDefaultBindings();
+    private readonly KeyboardKey[] _playerTwoBindings = CreatePlayerTwoDefaultBindings();
 
     private const int MenuItemHeight = 26;
     private const int MenuWidth = 170;
@@ -60,6 +62,8 @@ public sealed class RaylibRenderer : IRenderer
     private const int KeyBindPanelRowHeight = 28;
     private const int KeyBindPanelPadding = 10;
     private const int KeyBindHeaderHeight = 34;
+    private const int KeyBindPlayerTabWidth = 84;
+    private const int KeyBindPlayerTabHeight = 24;
 
     private static readonly string[] NesButtonLabels =
     {
@@ -211,7 +215,8 @@ public sealed class RaylibRenderer : IRenderer
 
         return player switch
         {
-            0 => ReadPlayerOne(),
+            0 => ReadPlayer(_playerOneBindings),
+            1 => ReadPlayer(_playerTwoBindings),
             _ => 0
         };
     }
@@ -465,13 +470,13 @@ public sealed class RaylibRenderer : IRenderer
         _debugClipCount = 0;
     }
 
-    private byte ReadPlayerOne()
+    private static byte ReadPlayer(KeyboardKey[] bindings)
     {
         byte state = 0;
 
-        for (var i = 0; i < _playerOneBindings.Length; i++)
+        for (var i = 0; i < bindings.Length; i++)
         {
-            if (Raylib.IsKeyDown(_playerOneBindings[i]))
+            if (Raylib.IsKeyDown(bindings[i]))
             {
                 state |= (byte)(1 << i);
             }
@@ -614,12 +619,21 @@ public sealed class RaylibRenderer : IRenderer
             return;
         }
 
-        BuildKeyBindPanelLayout(out var panelRect, out var rows, out var resetRect, out var closeRect);
+        BuildKeyBindPanelLayout(
+            out var panelRect,
+            out var rows,
+            out var playerOneRect,
+            out var playerTwoRect,
+            out var resetRect,
+            out var closeRect);
         var mousePos = Raylib.GetMousePosition();
+        var activeBindings = GetBindingsForPlayer(_keyBindPanelPlayer);
 
         Raylib.DrawRectangleRec(panelRect, new Color(22, 22, 22, 240));
         Raylib.DrawRectangleLinesEx(panelRect, 1, new Color(220, 220, 220, 255));
-        Raylib.DrawText("Key Binds (Player 1)", (int)panelRect.X + 10, (int)panelRect.Y + 8, 18, Color.RayWhite);
+        Raylib.DrawText("Key Binds", (int)panelRect.X + 10, (int)panelRect.Y + 8, 18, Color.RayWhite);
+        DrawPlayerTab("Player 1", playerOneRect, mousePos, _keyBindPanelPlayer == 0);
+        DrawPlayerTab("Player 2", playerTwoRect, mousePos, _keyBindPanelPlayer == 1);
 
         for (var i = 0; i < rows.Length; i++)
         {
@@ -631,7 +645,7 @@ public sealed class RaylibRenderer : IRenderer
 
             var value = _bindingCaptureIndex == i
                 ? "Press key..."
-                : FormatKeyName(_playerOneBindings[i]);
+                : FormatKeyName(activeBindings[i]);
             Raylib.DrawText(NesButtonLabels[i], (int)rows[i].X + 8, (int)rows[i].Y + 6, 16, Color.RayWhite);
             Raylib.DrawText(value, (int)rows[i].X + 150, (int)rows[i].Y + 6, 16, new Color(190, 230, 255, 255));
         }
@@ -648,6 +662,19 @@ public sealed class RaylibRenderer : IRenderer
         Raylib.DrawText(label, (int)rect.X + 10, (int)rect.Y + 5, 16, Color.RayWhite);
     }
 
+    private void DrawPlayerTab(string label, Rectangle rect, Vector2 mousePos, bool selected)
+    {
+        var isHovered = Raylib.CheckCollisionPointRec(mousePos, rect);
+        var fill = selected
+            ? new Color(88, 88, 88, 255)
+            : isHovered
+                ? new Color(64, 64, 64, 255)
+                : new Color(44, 44, 44, 255);
+        Raylib.DrawRectangleRec(rect, fill);
+        Raylib.DrawRectangleLinesEx(rect, 1, new Color(180, 180, 180, 255));
+        Raylib.DrawText(label, (int)rect.X + 8, (int)rect.Y + 4, 16, Color.RayWhite);
+    }
+
     private void HandleKeyBindPanelInput()
     {
         if (Raylib.IsKeyPressed(KeyboardKey.Escape))
@@ -662,7 +689,7 @@ public sealed class RaylibRenderer : IRenderer
             var keyPressed = Raylib.GetKeyPressed();
             if (keyPressed > 0)
             {
-                SetBinding(_bindingCaptureIndex, (KeyboardKey)keyPressed);
+                SetBinding(GetBindingsForPlayer(_keyBindPanelPlayer), _bindingCaptureIndex, (KeyboardKey)keyPressed);
                 _bindingCaptureIndex = -1;
             }
 
@@ -675,10 +702,30 @@ public sealed class RaylibRenderer : IRenderer
         }
 
         var mousePos = Raylib.GetMousePosition();
-        BuildKeyBindPanelLayout(out var panelRect, out var rows, out var resetRect, out var closeRect);
+        BuildKeyBindPanelLayout(
+            out var panelRect,
+            out var rows,
+            out var playerOneRect,
+            out var playerTwoRect,
+            out var resetRect,
+            out var closeRect);
         if (!Raylib.CheckCollisionPointRec(mousePos, panelRect))
         {
             _keyBindPanelOpen = false;
+            return;
+        }
+
+        if (Raylib.CheckCollisionPointRec(mousePos, playerOneRect))
+        {
+            _keyBindPanelPlayer = 0;
+            _bindingCaptureIndex = -1;
+            return;
+        }
+
+        if (Raylib.CheckCollisionPointRec(mousePos, playerTwoRect))
+        {
+            _keyBindPanelPlayer = 1;
+            _bindingCaptureIndex = -1;
             return;
         }
 
@@ -693,8 +740,11 @@ public sealed class RaylibRenderer : IRenderer
 
         if (Raylib.CheckCollisionPointRec(mousePos, resetRect))
         {
-            var defaults = CreateDefaultBindings();
-            Array.Copy(defaults, _playerOneBindings, _playerOneBindings.Length);
+            var bindings = GetBindingsForPlayer(_keyBindPanelPlayer);
+            var defaults = _keyBindPanelPlayer == 0
+                ? CreatePlayerOneDefaultBindings()
+                : CreatePlayerTwoDefaultBindings();
+            Array.Copy(defaults, bindings, bindings.Length);
             return;
         }
 
@@ -704,14 +754,30 @@ public sealed class RaylibRenderer : IRenderer
         }
     }
 
-    private void BuildKeyBindPanelLayout(out Rectangle panelRect, out Rectangle[] rows, out Rectangle resetRect, out Rectangle closeRect)
+    private void BuildKeyBindPanelLayout(
+        out Rectangle panelRect,
+        out Rectangle[] rows,
+        out Rectangle playerOneRect,
+        out Rectangle playerTwoRect,
+        out Rectangle resetRect,
+        out Rectangle closeRect)
     {
-        var rowCount = _playerOneBindings.Length;
+        var rowCount = NesButtonLabels.Length;
         var panelHeight = KeyBindPanelPadding * 2 + KeyBindHeaderHeight + rowCount * KeyBindPanelRowHeight + 44;
         var x = (Raylib.GetScreenWidth() - KeyBindPanelWidth) / 2f;
         var y = (Raylib.GetScreenHeight() - panelHeight) / 2f;
 
         panelRect = new Rectangle(x, y, KeyBindPanelWidth, panelHeight);
+        playerOneRect = new Rectangle(
+            panelRect.X + panelRect.Width - KeyBindPanelPadding - (KeyBindPlayerTabWidth * 2) - 6,
+            panelRect.Y + 8,
+            KeyBindPlayerTabWidth,
+            KeyBindPlayerTabHeight);
+        playerTwoRect = new Rectangle(
+            playerOneRect.X + KeyBindPlayerTabWidth + 6,
+            playerOneRect.Y,
+            KeyBindPlayerTabWidth,
+            KeyBindPlayerTabHeight);
         rows = new Rectangle[rowCount];
         var rowY = y + KeyBindPanelPadding + KeyBindHeaderHeight;
         for (var i = 0; i < rowCount; i++)
@@ -724,26 +790,36 @@ public sealed class RaylibRenderer : IRenderer
         closeRect = new Rectangle(panelRect.X + panelRect.Width - KeyBindPanelPadding - 90, buttonY, 90, 26);
     }
 
-    private void SetBinding(int index, KeyboardKey key)
+    private static KeyboardKey[] GetBindingsForPlayer(int player, KeyboardKey[] playerOneBindings, KeyboardKey[] playerTwoBindings)
     {
-        if (index < 0 || index >= _playerOneBindings.Length)
+        return player == 1 ? playerTwoBindings : playerOneBindings;
+    }
+
+    private KeyboardKey[] GetBindingsForPlayer(int player)
+    {
+        return GetBindingsForPlayer(player, _playerOneBindings, _playerTwoBindings);
+    }
+
+    private static void SetBinding(KeyboardKey[] bindings, int index, KeyboardKey key)
+    {
+        if (index < 0 || index >= bindings.Length)
         {
             return;
         }
 
-        for (var i = 0; i < _playerOneBindings.Length; i++)
+        for (var i = 0; i < bindings.Length; i++)
         {
-            if (i != index && _playerOneBindings[i] == key)
+            if (i != index && bindings[i] == key)
             {
-                _playerOneBindings[i] = _playerOneBindings[index];
+                bindings[i] = bindings[index];
                 break;
             }
         }
 
-        _playerOneBindings[index] = key;
+        bindings[index] = key;
     }
 
-    private static KeyboardKey[] CreateDefaultBindings()
+    private static KeyboardKey[] CreatePlayerOneDefaultBindings()
     {
         return
         [
@@ -758,6 +834,21 @@ public sealed class RaylibRenderer : IRenderer
         ];
     }
 
+    private static KeyboardKey[] CreatePlayerTwoDefaultBindings()
+    {
+        return
+        [
+            KeyboardKey.Null,
+            KeyboardKey.Null,
+            KeyboardKey.Null,
+            KeyboardKey.Null,
+            KeyboardKey.Null,
+            KeyboardKey.Null,
+            KeyboardKey.Null,
+            KeyboardKey.Null
+        ];
+    }
+
     private static string FormatKeyName(KeyboardKey key)
     {
         return key switch
@@ -765,6 +856,7 @@ public sealed class RaylibRenderer : IRenderer
             KeyboardKey.RightShift => "Right Shift",
             KeyboardKey.LeftShift => "Left Shift",
             KeyboardKey.Enter => "Enter",
+            KeyboardKey.Null => "Unbound",
             _ => key.ToString()
         };
     }
