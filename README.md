@@ -7,7 +7,7 @@
 # CuNES
 
 CuNES is a work-in-progress NES emulator written in C# with a Raylib frontend.  
-It currently supports loading `.nes` ROMs, rendering video, handling controller input, and generating APU audio (funky but working).
+It currently supports loading `.nes` ROMs, rendering video, handling controllers input, and generating APU audio.
 
 ## Download Release
 
@@ -19,7 +19,7 @@ Download the latest Windows release from [here](https://github.com/Ganta09/CuNES
 - Unofficial 6502 opcodes support (NMOS/NES behavior)
 - ROM loading at startup (`--rom`) or in-game via menu
 - In-game context menu (right click while playing)
-- Runtime key remapping from the UI (`Key Binds`)
+- Runtime key remapping from the UI (`Key Binds`) for both players
 
 ## AccuracyCoin Progress
 
@@ -41,12 +41,13 @@ Skipped $2004 Stress Test, doesn't work at all. Will try to improve.
   - Select: `Right Shift`
   - Start: `Enter`
   - D-Pad: Arrow keys
+- No default Player 2 bindings
 
 ## Build and Run
 
 ```bash
 dotnet build CuNES.sln
-dotnet run --project CuNES.csproj -- --rom path/to/game.nes
+dotnet run --project CuNES.csproj 
 ```
 
 ## Quick file tour 
@@ -72,8 +73,7 @@ dotnet run --project CuNES.csproj -- --rom path/to/game.nes
 
 - Savestates
 - Resize Window
-- Support Player 2
-
+- XInput support
 ## Screenshots / Images
 
 <p align="center">
