@@ -16,6 +16,9 @@ int? windowScale = null;
 var audioDebug = false;
 var noiseDebug = false;
 var mixDebug = false;
+var mmc3Debug = false;
+var mmc3ScanlineIrqClock = true;
+var ppuScrollDebug = false;
 
 for (var i = 0; i < args.Length; i++)
 {
@@ -108,6 +111,24 @@ for (var i = 0; i < args.Length; i++)
     {
         mixDebug = true;
     }
+    else if (arg.Equals("--debug-mmc3", StringComparison.OrdinalIgnoreCase)
+        || arg.Equals("--mmc3-debug", StringComparison.OrdinalIgnoreCase))
+    {
+        mmc3Debug = true;
+    }
+    else if (arg.Equals("--mmc3-irq-scanline", StringComparison.OrdinalIgnoreCase))
+    {
+        mmc3ScanlineIrqClock = true;
+    }
+    else if (arg.Equals("--mmc3-irq-a12", StringComparison.OrdinalIgnoreCase))
+    {
+        mmc3ScanlineIrqClock = false;
+    }
+    else if (arg.Equals("--debug-ppu-scroll", StringComparison.OrdinalIgnoreCase)
+        || arg.Equals("--ppu-scroll-debug", StringComparison.OrdinalIgnoreCase))
+    {
+        ppuScrollDebug = true;
+    }
 }
 
 if (romTestMode && string.IsNullOrWhiteSpace(romPath))
@@ -161,7 +182,10 @@ var config = new NesConfig
     WindowScale = windowScale ?? 3,
     EnableAudioDebug = audioDebug,
     EnableNoiseDebug = noiseDebug,
-    EnableMixDebug = mixDebug
+    EnableMixDebug = mixDebug,
+    EnableMmc3Debug = mmc3Debug,
+    UseMmc3ScanlineIrqClock = mmc3ScanlineIrqClock,
+    EnablePpuScrollDebug = ppuScrollDebug
 };
 
 var app = new NesApp(config, romPath, romTestMode);

@@ -8,6 +8,7 @@ public sealed class Ppu2C02
     public const int ScreenHeight = 240;
     // Keep decay well below 1 second; tests only require decaying before that.
     private const int OpenBusDecayPpuCycles = 1_000_000;
+    private const int ScrollDebugLogLimit = 2000;
     private static readonly byte[] SystemPalette =
     {
         84,84,84, 0,30,116, 8,16,144, 48,0,136, 68,0,100, 92,0,48, 84,4,0, 60,24,0,
@@ -49,6 +50,13 @@ public sealed class Ppu2C02
     private bool _resetFlagActive;
     private int _activeSpriteCount;
     private int _preparedSpriteScanline = -1;
+    private bool _scrollDebugEnabled;
+    private int _scrollDebugLogCount;
+    private long _scrollDebugLastSummaryMs;
+    private int _scrollDebugWrite2000Count;
+    private int _scrollDebugWrite2005Count;
+    private int _scrollDebugWrite2006Count;
+    private int _scrollDebugScanlineLoadCount;
 
     public byte[] FrameBuffer { get; } = new byte[ScreenWidth * ScreenHeight * 4];
 
@@ -99,8 +107,29 @@ public sealed class Ppu2C02
         _resetFlagActive = true;
         _activeSpriteCount = 0;
         _preparedSpriteScanline = -1;
+        _scrollDebugLogCount = 0;
+        _scrollDebugLastSummaryMs = Environment.TickCount64;
+        _scrollDebugWrite2000Count = 0;
+        _scrollDebugWrite2005Count = 0;
+        _scrollDebugWrite2006Count = 0;
+        _scrollDebugScanlineLoadCount = 0;
         Cycles = 0;
         FrameCount = 0;
+    }
+
+    public void SetScrollDebug(bool enabled)
+    {
+        _scrollDebugEnabled = enabled;
+        _scrollDebugLogCount = 0;
+        _scrollDebugLastSummaryMs = Environment.TickCount64;
+        _scrollDebugWrite2000Count = 0;
+        _scrollDebugWrite2005Count = 0;
+        _scrollDebugWrite2006Count = 0;
+        _scrollDebugScanlineLoadCount = 0;
+        if (_scrollDebugEnabled)
+        {
+            Console.WriteLine("[PPU-SCROLL] debug enabled");
+        }
     }
 
     public void Clock()
@@ -125,12 +154,24 @@ public sealed class Ppu2C02
             // Keep scroll stable for the current scanline to avoid per-pixel tearing.
             _scanlineScrollVramAddress = _tempVramAddress;
             _scanlineFineX = _fineX;
+            _scrollDebugScanlineLoadCount++;
+            ScrollDebugLog(
+                "scanline-load",
+                $"scanline={_scanline} loaded t->scanlineScroll v={FormatVram(_vramAddress)} t={FormatVram(_tempVramAddress)} fineX={_fineX}");
             PrepareActiveSpritesForScanline(_scanline);
         }
 
         if (_scanline is >= 0 and < 240 && _dot is >= 1 and <= 256)
         {
             RenderCurrentPixel(_dot - 1, _scanline);
+        }
+
+        var renderingEnabled = (_mask & 0x18) != 0;
+        if (renderingEnabled
+            && _dot == 260
+            && _scanline is >= 0 and < 240)
+        {
+            _cartridge?.NotifyPpuScanlineIrqClock();
         }
 
         _dot++;
@@ -188,6 +229,8 @@ public sealed class Ppu2C02
             case 0x0000:
                 _control = data;
                 _tempVramAddress = (ushort)((_tempVramAddress & 0xF3FF) | ((data & 0x03) << 10));
+                _scrollDebugWrite2000Count++;
+                ScrollDebugLog("write-$2000", $"data={FormatByte(data)} v={FormatVram(_vramAddress)} t={FormatVram(_tempVramAddress)} x={_fineX} w={(_addressLatch ? 1 : 0)}");
                 break;
             case 0x0001:
                 _mask = data;
@@ -205,12 +248,16 @@ public sealed class Ppu2C02
                     _fineX = (byte)(data & 0x07);
                     _tempVramAddress = (ushort)((_tempVramAddress & 0xFFE0) | (data >> 3));
                     _addressLatch = true;
+                    _scrollDebugWrite2005Count++;
+                    ScrollDebugLog("write-$2005-1", $"data={FormatByte(data)} v={FormatVram(_vramAddress)} t={FormatVram(_tempVramAddress)} x={_fineX} w=1");
                 }
                 else
                 {
                     _tempVramAddress = (ushort)((_tempVramAddress & 0x8FFF) | ((data & 0x07) << 12));
                     _tempVramAddress = (ushort)((_tempVramAddress & 0xFC1F) | ((data & 0xF8) << 2));
                     _addressLatch = false;
+                    _scrollDebugWrite2005Count++;
+                    ScrollDebugLog("write-$2005-2", $"data={FormatByte(data)} v={FormatVram(_vramAddress)} t={FormatVram(_tempVramAddress)} x={_fineX} w=0");
                 }
 
                 break;
@@ -219,12 +266,16 @@ public sealed class Ppu2C02
                 {
                     _tempVramAddress = (ushort)((_tempVramAddress & 0x00FF) | ((data & 0x3F) << 8));
                     _addressLatch = true;
+                    _scrollDebugWrite2006Count++;
+                    ScrollDebugLog("write-$2006-1", $"data={FormatByte(data)} v={FormatVram(_vramAddress)} t={FormatVram(_tempVramAddress)} x={_fineX} w=1");
                 }
                 else
                 {
                     _tempVramAddress = (ushort)((_tempVramAddress & 0xFF00) | data);
                     _vramAddress = _tempVramAddress;
                     _addressLatch = false;
+                    _scrollDebugWrite2006Count++;
+                    ScrollDebugLog("write-$2006-2", $"data={FormatByte(data)} v={FormatVram(_vramAddress)} t={FormatVram(_tempVramAddress)} x={_fineX} w=0");
                 }
 
                 break;
@@ -235,6 +286,7 @@ public sealed class Ppu2C02
         }
 
         LatchOpenBus(data);
+        MaybeScrollDebugSummary();
     }
 
     public void WriteOamByte(byte value)
@@ -287,6 +339,7 @@ public sealed class Ppu2C02
     private byte ReadPpuMemory(ushort address)
     {
         address &= 0x3FFF;
+        _cartridge?.NotifyPpuAddress(address, Cycles);
 
         if (address <= 0x1FFF)
         {
@@ -311,6 +364,7 @@ public sealed class Ppu2C02
     private void WritePpuMemory(ushort address, byte data)
     {
         address &= 0x3FFF;
+        _cartridge?.NotifyPpuAddress(address, Cycles);
 
         if (address <= 0x1FFF)
         {
@@ -411,26 +465,40 @@ public sealed class Ppu2C02
         var baseNametable = (_scanlineScrollVramAddress >> 10) & 0x03;
         var baseNtX = baseNametable & 0x01;
         var baseNtY = (baseNametable >> 1) & 0x01;
-        var scrollX = ((_scanlineScrollVramAddress & 0x001F) << 3) + _scanlineFineX;
-        var scrollY = (((_scanlineScrollVramAddress >> 5) & 0x001F) << 3) + ((_scanlineScrollVramAddress >> 12) & 0x0007);
+        var coarseXBase = _scanlineScrollVramAddress & 0x001F;
+        var coarseYBase = (_scanlineScrollVramAddress >> 5) & 0x001F;
+        var fineYBase = (_scanlineScrollVramAddress >> 12) & 0x0007;
 
-        var worldX = scrollX + x;
-        var worldY = scrollY + y;
+        var xTotal = _scanlineFineX + x;
+        var coarseX = coarseXBase + (xTotal >> 3);
+        var fineX = xTotal & 0x07;
+        var logicalNtX = (baseNtX + ((coarseX >> 5) & 0x01)) & 0x01;
+        var tileX = coarseX & 0x1F;
 
-        var ntOffsetX = (worldX / 256) & 0x01;
-        var ntOffsetY = (worldY / 240) & 0x01;
+        var yTotal = fineYBase + y;
+        var fineY = yTotal & 0x07;
+        var coarseYSteps = yTotal >> 3;
+        var coarseY = coarseYBase;
+        var logicalNtY = baseNtY;
+        for (var i = 0; i < coarseYSteps; i++)
+        {
+            if (coarseY == 29)
+            {
+                coarseY = 0;
+                logicalNtY ^= 0x01;
+            }
+            else if (coarseY == 31)
+            {
+                coarseY = 0;
+            }
+            else
+            {
+                coarseY++;
+            }
+        }
 
-        var logicalNtX = (baseNtX + ntOffsetX) & 0x01;
-        var logicalNtY = (baseNtY + ntOffsetY) & 0x01;
+        var tileY = coarseY;
         var nametableSelect = logicalNtX | (logicalNtY << 1);
-
-        var localX = worldX % 256;
-        var localY = worldY % 240;
-
-        var tileX = localX / 8;
-        var tileY = localY / 8;
-        var fineX = localX & 0x07;
-        var fineY = localY & 0x07;
 
         var nameTableBase = 0x2000 + nametableSelect * 0x400;
         var tileIndex = ReadPpuMemory((ushort)(nameTableBase + tileY * 32 + tileX));
@@ -628,5 +696,63 @@ public sealed class Ppu2C02
     {
         _ppuOpenBus = value;
         _ppuOpenBusAgeCycles = 0;
+    }
+
+    private void ScrollDebugLog(string eventName, string details)
+    {
+        if (!_scrollDebugEnabled)
+        {
+            return;
+        }
+
+        if (_scrollDebugLogCount < ScrollDebugLogLimit)
+        {
+            Console.WriteLine($"[PPU-SCROLL] {eventName} f={FrameCount} sl={_scanline} dot={_dot} | {details}");
+            _scrollDebugLogCount++;
+            if (_scrollDebugLogCount == ScrollDebugLogLimit)
+            {
+                Console.WriteLine($"[PPU-SCROLL] log limit reached ({ScrollDebugLogLimit}), switching to summary mode");
+            }
+        }
+
+        MaybeScrollDebugSummary();
+    }
+
+    private void MaybeScrollDebugSummary()
+    {
+        if (!_scrollDebugEnabled)
+        {
+            return;
+        }
+
+        var now = Environment.TickCount64;
+        if (now - _scrollDebugLastSummaryMs < 1000)
+        {
+            return;
+        }
+
+        Console.WriteLine(
+            $"[PPU-SCROLL] summary w2000={_scrollDebugWrite2000Count} w2005={_scrollDebugWrite2005Count} w2006={_scrollDebugWrite2006Count} " +
+            $"scanlineLoads={_scrollDebugScanlineLoadCount} v={FormatVram(_vramAddress)} t={FormatVram(_tempVramAddress)} x={_fineX} w={(_addressLatch ? 1 : 0)}");
+
+        _scrollDebugLastSummaryMs = now;
+        _scrollDebugWrite2000Count = 0;
+        _scrollDebugWrite2005Count = 0;
+        _scrollDebugWrite2006Count = 0;
+        _scrollDebugScanlineLoadCount = 0;
+    }
+
+    private static string FormatByte(byte value)
+    {
+        return $"${value:X2}";
+    }
+
+    private static string FormatVram(ushort value)
+    {
+        var coarseX = value & 0x001F;
+        var coarseY = (value >> 5) & 0x001F;
+        var nt = (value >> 10) & 0x03;
+        var fineY = (value >> 12) & 0x07;
+        return $"${value:X4}[nt={nt},cx={coarseX},cy={coarseY},fy={fineY}]";
     }
 }

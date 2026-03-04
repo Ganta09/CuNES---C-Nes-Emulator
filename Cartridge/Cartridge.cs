@@ -38,7 +38,10 @@ public sealed class Cartridge
         _mapper.Reset();
     }
 
-    public static Cartridge LoadFromFile(string path)
+    public static Cartridge LoadFromFile(
+        string path,
+        bool enableMmc3Debug = false,
+        bool useMmc3ScanlineIrqClock = true)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -103,7 +106,15 @@ public sealed class Cartridge
             Array.Copy(bytes, offset, chrData, 0, chrSize);
         }
 
-        var mapper = CreateMapper(mapperId, prgRomBanks, prgSize, chrData.Length, chrRomBanks == 0 ? 1 : chrRomBanks, mirroring);
+        var mapper = CreateMapper(
+            mapperId,
+            prgRomBanks,
+            prgSize,
+            chrData.Length,
+            chrRomBanks == 0 ? 1 : chrRomBanks,
+            mirroring,
+            enableMmc3Debug,
+            useMmc3ScanlineIrqClock);
 
         return new Cartridge(
             path: System.IO.Path.GetFullPath(path),
@@ -182,13 +193,30 @@ public sealed class Cartridge
         return true;
     }
 
+    public void NotifyPpuAddress(ushort address, ulong ppuCycle)
+    {
+        _mapper.NotifyPpuAddress(address, ppuCycle);
+    }
+
+    public bool ConsumeIrq()
+    {
+        return _mapper.ConsumeIrq();
+    }
+
+    public void NotifyPpuScanlineIrqClock()
+    {
+        _mapper.NotifyPpuScanlineIrqClock();
+    }
+
     private static IMapper CreateMapper(
         byte mapperId,
         int prgRomBanks,
         int prgRomBytes,
         int chrDataBytes,
         int chrRomBanks,
-        MirroringMode mirroring)
+        MirroringMode mirroring,
+        bool enableMmc3Debug,
+        bool useMmc3ScanlineIrqClock)
     {
         return mapperId switch
         {
@@ -196,7 +224,7 @@ public sealed class Cartridge
             1 => new Mapper001(prgRomBanks, chrRomBanks, mirroring),
             2 => new Mapper002(prgRomBanks, mirroring),
             3 => new Mapper003(prgRomBanks, chrRomBanks, mirroring),
-            4 => new Mapper004(prgRomBytes, chrDataBytes, mirroring),
+            4 => new Mapper004(prgRomBytes, chrDataBytes, mirroring, enableMmc3Debug, useMmc3ScanlineIrqClock),
             _ => throw new NotSupportedException(
                 $"Mapper {mapperId} is not supported yet. Supported mappers: 0, 1, 2, 3, 4.")
         };

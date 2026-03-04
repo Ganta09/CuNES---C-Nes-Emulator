@@ -15,4 +15,19 @@ internal interface IMapper
     bool PpuRead(ushort address, out int mappedAddress);
 
     bool PpuWrite(ushort address, out int mappedAddress);
+
+    void NotifyPpuAddress(ushort address, ulong ppuCycle)
+    {
+        _ = address;
+        _ = ppuCycle;
+    }
+
+    bool ConsumeIrq()
+    {
+        return false;
+    }
+
+    void NotifyPpuScanlineIrqClock()
+    {
+    }
 }

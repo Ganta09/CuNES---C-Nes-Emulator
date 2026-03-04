@@ -150,7 +150,12 @@ public sealed class SystemBus
 
     public bool ConsumeIrq()
     {
-        return _apu.ConsumeIrq();
+        if (_apu.ConsumeIrq())
+        {
+            return true;
+        }
+
+        return _cartridge?.ConsumeIrq() ?? false;
     }
 
     public bool ConsumeDmcCpuStallCycle()

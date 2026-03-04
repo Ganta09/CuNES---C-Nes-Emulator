@@ -10,4 +10,7 @@ public sealed class NesConfig
     public bool EnableAudioDebug { get; init; }
     public bool EnableNoiseDebug { get; init; }
     public bool EnableMixDebug { get; init; }
+    public bool EnableMmc3Debug { get; init; }
+    public bool UseMmc3ScanlineIrqClock { get; init; } = true;
+    public bool EnablePpuScrollDebug { get; init; }
 }

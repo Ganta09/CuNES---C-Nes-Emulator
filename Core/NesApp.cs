@@ -28,6 +28,7 @@ public sealed class NesApp
         _romPath = romPath;
         _romTestMode = romTestMode;
         _console = new NesConsole();
+        _console.Ppu.SetScrollDebug(_config.EnablePpuScrollDebug);
     }
 
     public void Run()
@@ -210,7 +211,10 @@ public sealed class NesApp
 
     private void LoadRom(string romPath)
     {
-        var cartridge = NesCartridge.LoadFromFile(romPath);
+        var cartridge = NesCartridge.LoadFromFile(
+            romPath,
+            _config.EnableMmc3Debug,
+            _config.UseMmc3ScanlineIrqClock);
         _console.InsertCartridge(cartridge);
         _console.Reset();
         Console.WriteLine($"ROM loaded: {cartridge.Path} | Mapper {cartridge.MapperId} | PRG {cartridge.PrgRomBanks}x16KB | CHR {cartridge.ChrRomBanks}x8KB");
